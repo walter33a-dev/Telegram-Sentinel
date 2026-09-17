@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import requests
 from flask import Flask, jsonify, request, send_file
 
-TOKEN = os.environ["BOT_TOKEN"]
+TOKEN = (os.environ.get("BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
 SENTINEL_URL = os.environ.get("SENTINEL_URL", "").strip()
 PORT = int(os.environ.get("PORT", "8080"))
 PUBLIC = (
@@ -16,11 +16,13 @@ PUBLIC = (
 )
 BASE = "https://" + PUBLIC.replace("https://", "").replace("http://", "").rstrip("/")
 STORE = "/tmp/incidents.json"
+PHOTO_DIR = "/tmp/photos"
 
-INCIDENTS: list[dict] = []
-PHOTOS: dict[str, bytes] = {}
+INCIDENTS: list = []
+PHOTOS: dict = {}
 
 http = Flask(__name__)
+os.makedirs(PHOTO_DIR, exist_ok=True)
 
 
 @http.after_request
@@ -38,9 +40,8 @@ def now_iso():
 def load():
     global INCIDENTS
     try:
-        INCIDENTS = json.load(open(STORE, encoding="utf-8"))
-        if not isinstance(INCIDENTS, list):
-            INCIDENTS = []
+        data = json.load(open(STORE, encoding="utf-8"))
+        INCIDENTS = data if isinstance(data, list) else []
     except Exception:
         INCIDENTS = []
 
@@ -64,6 +65,8 @@ def remember(row: dict):
 
 
 def download_photo(file_id: str) -> bytes:
+    if not TOKEN:
+        return b""
     meta = requests.get(
         f"https://api.telegram.org/bot{TOKEN}/getFile",
         params={"file_id": file_id},
@@ -96,6 +99,7 @@ def ingest_msg(msg: dict):
             data = download_photo(str(photo_id))
             name = f"tg{msg.get('message_id')}.jpg"
             PHOTOS[name] = data
+            open(os.path.join(PHOTO_DIR, name), "wb").write(data)
             photo_url = f"{BASE}/media/{name}"
         except Exception as exc:
             print("photo", exc)
@@ -121,7 +125,16 @@ def ingest_msg(msg: dict):
 @http.get("/")
 @http.get("/health")
 def health():
-    return jsonify({"ok": True, "name": "Telegram-Sentinel", "n": len(INCIDENTS), "protocol": "imagepush", "webhook": f"{BASE}/telegram"})
+    return jsonify(
+        {
+            "ok": True,
+            "name": "Telegram-Sentinel",
+            "n": len(INCIDENTS),
+            "protocol": "imagepush",
+            "webhook": f"{BASE}/telegram",
+            "has_token": bool(TOKEN),
+        }
+    )
 
 
 @http.get("/incidents")
@@ -133,6 +146,9 @@ def incidents():
 def media(name: str):
     data = PHOTOS.get(name)
     if not data:
+        path = os.path.join(PHOTO_DIR, name)
+        if os.path.isfile(path):
+            return send_file(path, mimetype="image/jpeg", download_name=name)
         return ("", 404)
     return send_file(io.BytesIO(data), mimetype="image/jpeg", download_name=name)
 
@@ -152,6 +168,9 @@ def preflight():
 
 
 def set_webhook():
+    if not TOKEN:
+        print("BOT_TOKEN manquant — webhook non posé, HTTP quand même")
+        return
     url = f"{BASE}/telegram"
     r = requests.get(
         f"https://api.telegram.org/bot{TOKEN}/setWebhook",
@@ -167,5 +186,8 @@ def set_webhook():
 
 if __name__ == "__main__":
     load()
-    set_webhook()
+    try:
+        set_webhook()
+    except Exception as exc:
+        print("webhook", exc)
     http.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
