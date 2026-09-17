@@ -2,7 +2,8 @@ import os
 import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
-TOKEN = os.environ SENTINEL_URL = os.environ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+TOKEN = os.environ SENTINEL_URL = os.environ 
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 msg = update.effective_message
 if not msg:
 return
