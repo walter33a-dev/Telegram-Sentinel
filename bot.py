@@ -23,6 +23,14 @@ PHOTOS: dict[str, bytes] = {}
 http = Flask(__name__)
 
 
+@http.after_request
+def cors(resp):
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp
+
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -135,6 +143,12 @@ def telegram():
     msg = body.get("message") or body.get("channel_post") or body.get("edited_message") or body.get("edited_channel_post") or {}
     ingest_msg(msg if isinstance(msg, dict) else {})
     return jsonify({"ok": True})
+
+
+@http.route("/telegram", methods=["OPTIONS"])
+@http.route("/incidents", methods=["OPTIONS"])
+def preflight():
+    return ("", 204)
 
 
 def set_webhook():
